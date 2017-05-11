@@ -1302,11 +1302,11 @@ InviteServerContext.prototype = {
 
     // commented out now-unused hold-related variables for jshint. See below. JMF 2014-1-21
     var
-      //idx, length, hasAudio, hasVideo,
+      idx, length, hasAudio, hasVideo,
       self = this,
       request = this.request,
       extraHeaders = (options.extraHeaders || []).slice(),
-    //mediaStream = options.mediaStream || null,
+      mediaStream = options.mediaStream || null,
       iceServers,
       stunServers = options.stunServers || null,
       turnServers = options.turnServers || null,
@@ -1409,7 +1409,6 @@ InviteServerContext.prototype = {
     SIP.Timers.clearTimeout(this.timers.userNoAnswerTimer);
 
     // this hold-related code breaks FF accepting new calls - JMF 2014-1-21
-    /*
     length = this.getRemoteStreams().length;
 
     for (idx = 0; idx < length; idx++) {
@@ -1440,7 +1439,6 @@ InviteServerContext.prototype = {
         }
       }
     }
-    */
 
     if (this.status === C.STATUS_EARLY_MEDIA) {
       descriptionCreationSucceeded({});

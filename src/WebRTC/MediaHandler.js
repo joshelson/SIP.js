@@ -142,12 +142,20 @@ MediaHandler.prototype = Object.create(SIP.MediaHandler.prototype, {
         if (self.local_hold) {
           // Don't receive media
           // TODO - This will break for media streams with different directions.
+
           if (!(/a=(sendrecv|sendonly|recvonly|inactive)/).test(sdp)) {
+	    self.logger.log("Replacing m= lines");
             sdp = sdp.replace(/(m=[^\r]*\r\n)/g, '$1a=sendonly\r\n');
           } else {
+	    self.logger.log("Replacing sendrecv");
             sdp = sdp.replace(/a=sendrecv\r\n/g, 'a=sendonly\r\n');
             sdp = sdp.replace(/a=recvonly\r\n/g, 'a=inactive\r\n');
+	    sdp = sdp.replace("a=setup:passive\r\n", "a=setup:actpass\r\n");
           }
+        } else {
+	    self.logger.log("not in local hold, but check to fix sendonly");
+            sdp = sdp.replace(/a=sendonly\r\n/g, 'a=sendrecv\r\n');
+	    sdp = sdp.replace("a=setup:passive\r\n", "a=setup:actpass\r\n");
         }
 
         return {
