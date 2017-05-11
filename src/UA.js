@@ -941,6 +941,7 @@ UA.prototype.loadConfig = function(configuration) {
       hackAllowUnregisteredOptionTags: false,
       hackCleanJitsiSdpImageattr: false,
       hackStripTcp: false,
+      hackChromeActPass: false,
 
       contactTransport: 'ws',
       forceRport: false,
@@ -1315,6 +1316,12 @@ UA.prototype.getConfigurationCheck = function () {
       hackStripTcp: function(hackStripTcp) {
         if (typeof hackStripTcp === 'boolean') {
           return hackStripTcp;
+        }
+      },
+
+      hackChromeActPass: function(hackChromeActPass) {
+        if (typeof hackChromeActPass === 'boolean') {
+          return hackChromeActPass;
         }
       },
 

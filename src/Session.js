@@ -615,6 +615,7 @@ Session.prototype = {
     this.mediaHandler.getDescription(self.mediaHint)
     .then(
       function(description){
+	console.log('sending reinvite',description);
         self.dialog.sendRequest(self, SIP.C.INVITE, {
           extraHeaders: extraHeaders,
           body: description

@@ -119,6 +119,7 @@ MediaHandler.prototype = Object.create(SIP.MediaHandler.prototype, {
 
     return streamPromise
       .then(function streamAdditionSucceeded() {
+        self.logger.log('streamAdditionSucceeded');
         if (self.hasOffer('remote')) {
           self.peerConnection.ondatachannel = function (evt) {
             self.dataChannel = evt.channel;
@@ -133,11 +134,19 @@ MediaHandler.prototype = Object.create(SIP.MediaHandler.prototype, {
           self.emit('dataChannel', self.dataChannel);
         }
 
+        self.logger.log('Creating Offer or Answer');
         self.render();
         return self.createOfferOrAnswer(self.RTCConstraints);
       })
       .then(function(sdp) {
+        self.logger.log('Some additional stuff');
         sdp = SIP.Hacks.Firefox.hasMissingCLineInSDP(sdp);
+
+        if (self.session.ua.configuration.hackChromeActPass && self.local_hold) {
+          self.logger.log('Local Hold Situation');
+          sdp = sdp.replace("a=setup:passive\r\n", "a=setup:actpass\r\n");
+          sdp = sdp.replace("a=setup:active\r\n", "a=setup:actpass\r\n");
+        }
 
         if (self.local_hold) {
           // Don't receive media
@@ -180,10 +189,19 @@ MediaHandler.prototype = Object.create(SIP.MediaHandler.prototype, {
     sdp = SIP.Hacks.Firefox.cannotHandleExtraWhitespace(sdp);
     sdp = SIP.Hacks.AllBrowsers.maskDtls(sdp);
 
+    var sdptype = this.hasOffer('local') ? 'answer' : 'offer';
+
+    if (this.session.ua.configuration.hackChromeActPass && sdptype === "offer") {
+      this.logger.log('setRemoteDescription: Trying to replace active/passive with actpass');
+      sdp = SIP.Hacks.Chrome.rewriteActPass(sdp);
+    }
+
     var rawDescription = {
-      type: this.hasOffer('local') ? 'answer' : 'offer',
+      type: sdptype,
       sdp: sdp
     };
+
+    console.log('sdp',rawDescription.sdp);
 
     this.emit('setDescription', rawDescription);
 

@@ -89,6 +89,11 @@ var Hacks = {
   },
 
   Chrome: {
+    rewriteActPass: function (sdp) {
+      sdp = sdp.replace("a=setup:passive\r\n", "a=setup:actpass\r\n");
+      sdp = sdp.replace("a=setup:active\r\n", "a=setup:actpass\r\n");
+      return sdp;
+    },
     needsExplicitlyInactiveSDP: function (sdp) {
       var sub, index;
 
