@@ -1430,7 +1430,7 @@ InviteServerContext.prototype = {
       }
     }
 
-    if (!hasVideo && this.mediaConstraints.video === true) {
+    if (!hasVideo && this.mediaConstraints && this.mediaConstraints.video === true) {
       this.mediaConstraints.video = false;
       if (mediaStream) {
         length = mediaStream.getVideoTracks().length;
