@@ -394,7 +394,7 @@ SessionDescriptionHandler.prototype = Object.create(SIP.SessionDescriptionHandle
     }
 
     this.peerConnection = new this.WebRTC.RTCPeerConnection(options.rtcConfiguration,
-		options.rtcConstraints);
+      options.rtcConstraints);
 
     this.logger.log('New peer connection created');
 
