@@ -1,4 +1,12 @@
 "use strict";
+
+var WebRTC = require('react-native-webrtc');
+var {
+  RTCPeerConnection,
+  MediaStream,
+  getUserMedia,
+} = WebRTC;
+
 /**
  * @fileoverview SessionDescriptionHandler
  */
@@ -41,11 +49,10 @@ var SessionDescriptionHandler = function(logger, observer, options) {
     this.modifiers = [this.modifiers];
   }
 
-  var environment = global.window || global;
   this.WebRTC = {
-    MediaStream           : environment.MediaStream,
-    getUserMedia          : environment.navigator.mediaDevices.getUserMedia.bind(environment.navigator.mediaDevices),
-    RTCPeerConnection     : environment.RTCPeerConnection
+    MediaStream: MediaStream,
+    getUserMedia: getUserMedia,
+    RTCPeerConnection: RTCPeerConnection
   };
 
   this.iceGatheringDeferred = null;
@@ -149,6 +156,22 @@ SessionDescriptionHandler.prototype = Object.create(SIP.SessionDescriptionHandle
       }
     })
     .then(() => this.createOfferOrAnswer(options.RTCOfferOptions, modifiers))
+    .then((description) => {
+      // Recreate offer containing the ICE Candidates
+      if (description.type === 'offer') {
+        return this.peerConnection.createOffer()
+        .then((sdp) => this.createRTCSessionDescriptionInit(sdp));
+      }
+      return description;
+    })
+    .catch((e) => {
+      if (e instanceof SIP.Exceptions.SessionDescriptionHandlerError) {
+        throw e;
+      }
+      const error = new SIP.Exceptions.SessionDescriptionHandlerError("createOffer failed", e);
+      this.logger.error(error);
+      throw error;
+    })
     .then((description) => {
       this.emit('getDescription', description);
       return {
@@ -401,7 +424,6 @@ SessionDescriptionHandler.prototype = Object.create(SIP.SessionDescriptionHandle
     options = options || {};
     options = this.addDefaultIceCheckingTimeout(options);
     options.rtcConfiguration = options.rtcConfiguration || {};
-    options.rtcConstraints = options.rtcConstraints || {};
     options.rtcConfiguration = this.addDefaultIceServers(options.rtcConfiguration);
 
     this.logger.log('initPeerConnection');
@@ -412,8 +434,7 @@ SessionDescriptionHandler.prototype = Object.create(SIP.SessionDescriptionHandle
       this.peerConnection.close();
     }
 
-    this.peerConnection = new this.WebRTC.RTCPeerConnection(options.rtcConfiguration,
-      options.rtcConstraints);
+    this.peerConnection = new this.WebRTC.RTCPeerConnection(options.rtcConfiguration);
 
     this.logger.log('New peer connection created');
 

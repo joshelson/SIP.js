@@ -10,11 +10,11 @@ describe('Session', function() {
     Session = new SIP.EventEmitter();
     var sessionDescriptionHandlerFactory = function() {
       return {
-        getDescription: function () { return SIP.Utils.Promise.resolve('foo'); },
+        getDescription: function () { return Promise.resolve('foo'); },
         hasDescription: function (contentType) {
           return contentType === 'application/sdp';
         },
-        setDescription: function () { return SIP.Utils.Promise.resolve(); }
+        setDescription: function () { return Promise.resolve(); }
       };
     };
     SIP.Utils.augment(Session, SIP.Session, [sessionDescriptionHandlerFactory]);
@@ -360,11 +360,11 @@ describe('Session', function() {
     beforeEach(function() {
       spyOn(Session, 'emit');
       Session.sessionDescriptionHandler = {
-        getDescription: jasmine.createSpy('getDescription').and.returnValue(SIP.Utils.Promise.resolve(true)),
+        getDescription: jasmine.createSpy('getDescription').and.returnValue(Promise.resolve(true)),
         hasDescription: function(contentType) {
           return contentType === 'application/sdp';
         },
-        setDescription: jasmine.createSpy('setDescription').and.returnValue(SIP.Utils.Promise.resolve(true))
+        setDescription: jasmine.createSpy('setDescription').and.returnValue(Promise.resolve(true))
       };
     });
 
@@ -386,7 +386,7 @@ describe('Session', function() {
         hasDescription: function(contentType) {
           return contentType === 'application/sdp';
         },
-        setDescription: jasmine.createSpy('setDescription').and.returnValue(SIP.Utils.Promise.resolve(true))
+        setDescription: jasmine.createSpy('setDescription').and.returnValue(Promise.resolve(true))
       };
     });
 
@@ -410,7 +410,24 @@ describe('Session', function() {
       expect(Session.sessionDescriptionHandler.setDescription).not.toHaveBeenCalled();
     });
 
+    it('returns without emitting anything when the response status code is 2xx and there is no pending reinvite', function() {
+      Session.pendingReinvite = false;
+
+      message.body = null;
+      message.headers['Content-Type'] = [];
+      message.status_code = 204;
+      message.transaction = {
+        sendACK: jasmine.createSpy('sendACK').and.returnValue({})
+      };
+
+      Session.receiveReinviteResponse(message);
+
+      expect(Session.emit).not.toHaveBeenCalled();
+    });
+
     it('emits renegotiationError when the response has no body with a 2xx status code', function() {
+      Session.pendingReinvite = true;
+
       message.body = null;
       message.headers['Content-Type'] = [];
       message.status_code = 222;
@@ -427,6 +444,8 @@ describe('Session', function() {
     });
 
     it('emits renegotiationError when the response\'s content-type is not application/sdp with a 2xx status code', function() {
+      Session.pendingReinvite = true;
+
       spyOn(message, 'getHeader').and.returnValue('wrong');
       message.status_code = 222;
       message.transaction = {
@@ -442,6 +461,8 @@ describe('Session', function() {
     });
 
     it('calls sendRequest and setDescription when response has a 2xx status code, a body, and content-type of application/sdp', function() {
+      Session.pendingReinvite = true;
+
       message.status_code = 222;
       message.transaction = {
         sendACK: jasmine.createSpy('sendACK').and.returnValue({})
@@ -457,6 +478,8 @@ describe('Session', function() {
     });
 
     it('returns without calling sendRequest and emits renegotiationError when response status code is neither 1xx or 2xx', function() {
+      Session.pendingReinvite = true;
+
       message.status_code = 333;
       message.transaction = {
         sendACK: jasmine.createSpy('sendACK').and.returnValue({})
@@ -707,11 +730,11 @@ describe('InviteServerContext', function() {
       wsServers: 'ws://server.example.com',
       sessionDescriptionHandlerFactory: function() {
         return {
-          getDescription: jasmine.createSpy('getDescription').and.returnValue(SIP.Utils.Promise.resolve('foo')),
+          getDescription: jasmine.createSpy('getDescription').and.returnValue(Promise.resolve('foo')),
           hasDescription: function (contentType) {
             return contentType === 'application/sdp';
           },
-          setDescription: jasmine.createSpy('setDescription').and.returnValue(SIP.Utils.Promise.resolve()),
+          setDescription: jasmine.createSpy('setDescription').and.returnValue(Promise.resolve()),
           close: function() {return true;},
           on: function () {}
         };
@@ -746,6 +769,7 @@ describe('InviteServerContext', function() {
 
   afterEach(function(){
     if(ua.status !== 2) {
+      ua.sessions = [];
       ua.stop();
     };
   });
@@ -784,7 +808,7 @@ describe('InviteServerContext', function() {
     spyOn(SIP.Utils, 'augment').and.callThrough();
 
     var ISC = new SIP.InviteServerContext(ua, request);
-    SIP.Timers.clearTimeout(ISC.timers.userNoAnswerTimer);
+    clearTimeout(ISC.timers.userNoAnswerTimer);
 
     expect(SIP.Utils.augment.calls.argsFor(0)[1]).toBe(SIP.ServerContext);
     expect(SIP.Utils.augment.calls.argsFor(1)[1]).toBe(SIP.Session);
@@ -823,7 +847,7 @@ describe('InviteServerContext', function() {
     request.transport = ua.transport;
 
     var ISC = new SIP.InviteServerContext(ua, request);
-    SIP.Timers.clearTimeout(ISC.timers.userNoAnswerTimer);
+    clearTimeout(ISC.timers.userNoAnswerTimer);
 
     expect(ISC.rel100).toBe(SIP.C.supported.REQUIRED);
   });
@@ -849,7 +873,7 @@ describe('InviteServerContext', function() {
     request.transport = ua.transport;
 
     var ISC = new SIP.InviteServerContext(ua, request);
-    SIP.Timers.clearTimeout(ISC.timers.userNoAnswerTimer);
+    clearTimeout(ISC.timers.userNoAnswerTimer);
 
     expect(ISC.rel100).toBe(SIP.C.supported.SUPPORTED);
   });
@@ -878,7 +902,7 @@ describe('InviteServerContext', function() {
     spyOn(SIP.Session.prototype,'createDialog').and.returnValue(false);
 
     ISC = new SIP.InviteServerContext(ua, fakereq);
-    SIP.Timers.clearTimeout(ISC.timers.userNoAnswerTimer);
+    clearTimeout(ISC.timers.userNoAnswerTimer);
 
     expect(fakereq.reply).toHaveBeenCalledWith(500, 'Missing Contact header field');
   });
@@ -1012,13 +1036,13 @@ describe('InviteServerContext', function() {
     });
 
     it('clears the userNoAnswerTimer', function() {
-      spyOn(SIP.Timers, 'clearTimeout').and.callThrough();
+      spyOn(window, 'clearTimeout').and.callThrough();
 
-      InviteServerContext.timers.userNoAnswerTimer = SIP.Timers.setTimeout(function() {}, 200);
+      InviteServerContext.timers.userNoAnswerTimer = setTimeout(function() {}, 200);
 
       InviteServerContext.accept();
 
-      expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.userNoAnswerTimer);
+      expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.userNoAnswerTimer);
     });
 
     // x'ing this since the code it tests currently breaks FF accept - JMF 2014-1-21
@@ -1069,18 +1093,18 @@ describe('InviteServerContext', function() {
         spyOn(InviteServerContext, 'canceled');
         spyOn(InviteServerContext, 'failed');
         spyOn(InviteServerContext, 'terminated').and.callThrough();
-        spyOn(SIP.Timers, 'clearTimeout').and.callThrough();
+        spyOn(window, 'clearTimeout').and.callThrough();
 
-        InviteServerContext.timers.prackTimer = SIP.Timers.setTimeout(function(){}, 100);
-        InviteServerContext.timers.rel1xxTimer = SIP.Timers.setTimeout(function(){}, 100);
+        InviteServerContext.timers.prackTimer = setTimeout(function(){}, 100);
+        InviteServerContext.timers.rel1xxTimer = setTimeout(function(){}, 100);
       });
 
       it('status is WAITING_FOR_ANSWER, timers cleared', function() {
         InviteServerContext.status = 4;
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
       });
 
       it('status is WAITING_FOR_PRACK, timers cleared', function() {
@@ -1088,8 +1112,8 @@ describe('InviteServerContext', function() {
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
       });
 
       it('status is ANSWERED_WAITING_FOR_PRACK, timers cleared', function() {
@@ -1097,8 +1121,8 @@ describe('InviteServerContext', function() {
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
       });
 
       it('status is EARLY_MEDIA, timers cleared', function() {
@@ -1106,8 +1130,8 @@ describe('InviteServerContext', function() {
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
       });
 
       it('status is ANSWERED, timers cleared', function() {
@@ -1115,8 +1139,8 @@ describe('InviteServerContext', function() {
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.prackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.rel1xxTimer);
       });
 
       afterEach(function() {
@@ -1156,7 +1180,7 @@ describe('InviteServerContext', function() {
           hasDescription: function() {
             return true;
           },
-          setDescription: jasmine.createSpy('setDescription').and.returnValue(SIP.Utils.Promise.resolve(true)),
+          setDescription: jasmine.createSpy('setDescription').and.returnValue(Promise.resolve(true)),
           close: function() {
             return;
           }
@@ -1186,7 +1210,7 @@ describe('InviteServerContext', function() {
 
       it('calls confirmSession if session.early_sdp is true and above is false', function() {
         InviteServerContext.early_sdp = true;
-        spyOn(SIP.Timers, 'clearTimeout').and.callThrough();
+        spyOn(window, 'clearTimeout').and.callThrough();
         spyOn(InviteServerContext, 'accepted').and.callThrough();
         var catchSpy = jasmine.createSpy('catch');
         InviteServerContext.ua.transport.send = function () {return {catch: catchSpy};};
@@ -1202,8 +1226,8 @@ describe('InviteServerContext', function() {
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
 
         expect(InviteServerContext.status).toBe(12);
         expect(InviteServerContext.accepted).not.toHaveBeenCalled();
@@ -1213,7 +1237,7 @@ describe('InviteServerContext', function() {
         InviteServerContext.hasOffer = true;
         InviteServerContext.hasAnswer = true;
 
-        spyOn(SIP.Timers, 'clearTimeout').and.callThrough();
+        spyOn(window, 'clearTimeout').and.callThrough();
         spyOn(InviteServerContext, 'emit');
         InviteServerContext.dialog = new SIP.Dialog(InviteServerContext, req, 'UAS');
 
@@ -1229,8 +1253,8 @@ describe('InviteServerContext', function() {
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
 
         expect(InviteServerContext.status).toBe(12);
         expect(InviteServerContext.emit.calls.mostRecent().args[0]).toBe('confirmed');
@@ -1263,7 +1287,7 @@ describe('InviteServerContext', function() {
       });
 
       it('calls sessionDescriptionHandler.setDescription when the invite had no body, but the request had sdp', function(){
-        // spyOn(InviteServerContext.mediaHandler, 'setDescription').and.returnValue(SIP.Utils.Promise.resolve(true));
+        // spyOn(InviteServerContext.mediaHandler, 'setDescription').and.returnValue(Promise.resolve(true));
         InviteServerContext.request.body = null;
 
         InviteServerContext.receiveRequest(req);
@@ -1303,14 +1327,14 @@ describe('InviteServerContext', function() {
         InviteServerContext.hasOffer = true;
         InviteServerContext.hasAnswer = true;
 
-        spyOn(SIP.Timers, 'clearTimeout').and.callThrough();
+        spyOn(window, 'clearTimeout').and.callThrough();
         spyOn(req, 'reply');
         spyOn(InviteServerContext, 'accept');
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
         expect(InviteServerContext.accept).not.toHaveBeenCalled();
         expect(req.reply).toHaveBeenCalledWith(200);
       });
@@ -1319,15 +1343,15 @@ describe('InviteServerContext', function() {
         InviteServerContext.hasOffer = true;
         InviteServerContext.hasAnswer = true;
 
-        spyOn(SIP.Timers, 'clearTimeout').and.callThrough();
+        spyOn(window, 'clearTimeout').and.callThrough();
         spyOn(req, 'reply');
         spyOn(InviteServerContext, 'accept');
         InviteServerContext.status = 10;
 
         InviteServerContext.receiveRequest(req);
 
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
-        expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.ackTimer);
+        expect(clearTimeout).toHaveBeenCalledWith(InviteServerContext.timers.invite2xxTimer);
         expect(InviteServerContext.accept).toHaveBeenCalled();
         expect(req.reply).toHaveBeenCalledWith(200);
       });
@@ -1511,11 +1535,11 @@ describe('InviteClientContext', function() {
     ua = new SIP.UA({uri: 'alice@example.com', wsServers: 'ws:server.example.com',
       sessionDescriptionHandlerFactory: function() {
         return {
-          getDescription: function () { return SIP.Utils.Promise.resolve('foo'); },
+          getDescription: function () { return Promise.resolve('foo'); },
           hasDescription: function (contentType) {
             return contentType === 'application/sdp';
           },
-          setDescription: function () { return SIP.Utils.Promise.resolve(); },
+          setDescription: function () { return Promise.resolve(); },
           close: function () { return true; }
         };
       }
@@ -2048,8 +2072,8 @@ describe('InviteClientContext', function() {
         InviteClientContext.request.body = null;
         InviteClientContext.mediaHandler = jasmine.createSpyObj('mediaHandler', ['close', 'getDescription', 'hasDescription', 'setDescription']);
         InviteClientContext.mediaHandler.hasDescription.and.returnValue(true);
-        InviteClientContext.mediaHandler.getDescription.and.returnValue(SIP.Utils.Promise.resolve(true));
-        InviteClientContext.mediaHandler.setDescription.and.returnValue(SIP.Utils.Promise.resolve(true));
+        InviteClientContext.mediaHandler.getDescription.and.returnValue(Promise.resolve(true));
+        InviteClientContext.mediaHandler.setDescription.and.returnValue(Promise.resolve(true));
 
         InviteClientContext.receiveInviteResponse(response);
 
@@ -2060,7 +2084,7 @@ describe('InviteClientContext', function() {
         InviteClientContext.request.body = null;
         InviteClientContext.mediaHandler = jasmine.createSpyObj('mediaHandler', ['close', 'hasDescription', 'setDescription']);
         InviteClientContext.mediaHandler.hasDescription.and.returnValue(true);
-        InviteClientContext.mediaHandler.setDescription.and.returnValue(SIP.Utils.Promise.resolve(true));
+        InviteClientContext.mediaHandler.setDescription.and.returnValue(Promise.resolve(true));
         spyOn(InviteClientContext, 'createDialog').and.returnValue(false);
 
         InviteClientContext.receiveInviteResponse(response);
@@ -2070,9 +2094,9 @@ describe('InviteClientContext', function() {
 
       xit('calls mediaHandler.setDescription if the request has a body', function() {
         InviteClientContext.mediaHandler = jasmine.createSpyObj('mediaHandler', ['close', 'getDescription', 'hasDescription', 'setDescription']);
-        InviteClientContext.mediaHandler.getDescription.and.returnValue(SIP.Utils.Promise.resolve(true));
+        InviteClientContext.mediaHandler.getDescription.and.returnValue(Promise.resolve(true));
         InviteClientContext.mediaHandler.hasDescription.and.returnValue(true);
-        InviteClientContext.mediaHandler.setDescription.and.returnValue(SIP.Utils.Promise.resolve(true));
+        InviteClientContext.mediaHandler.setDescription.and.returnValue(Promise.resolve(true));
 
         InviteClientContext.receiveInviteResponse(response);
 
@@ -2081,8 +2105,8 @@ describe('InviteClientContext', function() {
 
       xit('same as above, but does not make the call if the createDialog fails', function() {
         InviteClientContext.mediaHandler = jasmine.createSpyObj('mediaHandler', ['close', 'getDescription', 'hasDescription', 'setDescription']);
-        InviteClientContext.mediaHandler.hasDescription.and.returnValue(SIP.Utils.Promise.resolve(true));
-        InviteClientContext.mediaHandler.setDescription.and.returnValue(SIP.Utils.Promise.resolve(true));
+        InviteClientContext.mediaHandler.hasDescription.and.returnValue(Promise.resolve(true));
+        InviteClientContext.mediaHandler.setDescription.and.returnValue(Promise.resolve(true));
         spyOn(InviteClientContext, 'createDialog').and.returnValue(false);
 
         InviteClientContext.receiveInviteResponse(response);
@@ -2111,9 +2135,12 @@ describe('InviteClientContext', function() {
       expect(function() {InviteClientContext.cancel();}).toThrowError('Invalid status: 9');
     });
 
-    it('throws a type error if the status code is invalid or less than 200', function() {
-      expect(function() {InviteClientContext.cancel({status_code: 100});}).toThrowError('Invalid status_code: 100');
+    it('throws a type error if the status code is invalid', function() {
       expect(function() {InviteClientContext.cancel({status_code: 700});}).toThrowError('Invalid status_code: 700');
+    });
+
+    it('throws a type error if the status code is less than 200', function() {
+      expect(function() {InviteClientContext.cancel({status_code: 100});}).toThrowError('Invalid status_code: 100');
     });
 
     it('sets isCanceled to true, calls canceled, and returns this if status is NULL', function() {
@@ -2264,13 +2291,13 @@ describe('InviteClientContext', function() {
       InviteClientContext.status = 7;
       request.method = SIP.C.ACK;
 
-      spyOn(SIP.Timers, 'clearTimeout');
+      spyOn(window, 'clearTimeout');
 
       InviteClientContext.receiveRequest(request);
 
       expect(InviteClientContext.status).toBe(12);
-      expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteClientContext.timers.ackTimer);
-      expect(SIP.Timers.clearTimeout).toHaveBeenCalledWith(InviteClientContext.timers.invite2xxTimer);
+      expect(clearTimeout).toHaveBeenCalledWith(InviteClientContext.timers.ackTimer);
+      expect(clearTimeout).toHaveBeenCalledWith(InviteClientContext.timers.invite2xxTimer);
     });
 
     xit('DTMF case', function() {

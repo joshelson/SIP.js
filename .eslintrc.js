@@ -1,9 +1,13 @@
 module.exports = {
     "env": {
-        "node": true
+        "node": true,
+        "es6": true
     },
     "globals": {
       "Uint8Array": false
+    },
+    "parserOptions": {
+      "ecmaVersion": 6
     },
     "extends": "eslint:recommended",
     "rules": {
@@ -209,7 +213,7 @@ module.exports = {
             }
         ],
         "prefer-numeric-literals": "error",
-        "prefer-promise-reject-errors": "error",
+        "prefer-promise-reject-errors": "off",
         "prefer-reflect": "off",
         "prefer-rest-params": "off",
         "prefer-spread": "off",

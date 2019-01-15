@@ -230,7 +230,7 @@ other_param       = param: pname value: ( "=" pvalue )? {
                       else {
                         value = value[1];
                       }
-                      options.data.uri_params[param.toLowerCase()] = value && value.toLowerCase();}
+                      options.data.uri_params[param.toLowerCase()] = value;}
 
 pname             = $ paramchar +
 
@@ -924,7 +924,7 @@ hex12         = hex4 hex4 hex4
 
 // RFC 3420 (message/sipfrag)
 
-sipfrag = SIP_Version SP Status_Code SP Method CRLF?
+sipfrag = Request_Response header* (CRLF message_body)?
 
 // RFC 3892 (Referred-By)
 
