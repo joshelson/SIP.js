@@ -513,7 +513,8 @@ export class SessionDescriptionHandler extends EventEmitter implements SessionDe
       this.peerConnection.close();
     }
 
-    this.peerConnection = new this.WebRTC.RTCPeerConnection(options.rtcConfiguration);
+    this.peerConnection = new this.WebRTC.RTCPeerConnection(options.rtcConfiguration,
+      options.rtcConstraints);
 
     this.logger.log("New peer connection created");
 
