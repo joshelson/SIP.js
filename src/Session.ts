@@ -5,33 +5,38 @@ import { C } from "./Constants";
 import {
   AckableIncomingResponseWithSession,
   Body,
+  Exception,
   fromBodyLegacy,
-  fromBodyObj,
   getBody,
+  Grammar,
   IncomingAckRequest,
   IncomingInviteRequest,
   IncomingPrackRequest,
   IncomingRequest,
+  IncomingRequestMessage,
   IncomingResponse,
+  IncomingResponseMessage,
+  InviteServerTransaction,
+  Logger,
+  NameAddrHeader,
+  NonInviteServerTransaction,
   OutgoingInviteRequest,
   OutgoingInviteRequestDelegate,
   OutgoingRequest,
   OutgoingRequestDelegate,
+  OutgoingRequestMessage,
   OutgoingResponse,
   OutgoingResponseWithSession,
   PrackableIncomingResponseWithSession,
-  RequestOptions
-} from "./Core/messages";
-import { Session as SessionCore, SessionState, SignalingState } from "./Core/session";
-import {
-  InviteServerTransaction,
-  NonInviteServerTransaction
-} from "./Core/transactions";
+  RequestOptions,
+  Session as SessionCore,
+  SessionState,
+  SignalingState,
+  Timers,
+  URI
+} from "./core";
 import { SessionStatus, TypeStrings } from "./Enums";
-import { Exception, Exceptions } from "./Exceptions";
-import { Grammar } from "./Grammar";
-import { Logger } from "./LoggerFactory";
-import { NameAddrHeader } from "./NameAddrHeader";
+import { Exceptions } from "./Exceptions";
 import {
   ReferClientContext,
   ReferServerContext
@@ -46,14 +51,7 @@ import {
 } from "./session-description-handler";
 import { SessionDescriptionHandlerFactory } from "./session-description-handler-factory";
 import { DTMF } from "./Session/DTMF";
-import {
-  IncomingRequest as IncomingRequestMessage,
-  IncomingResponse as IncomingResponseMessage,
-  OutgoingRequest as OutgoingRequestMessage
-} from "./SIPMessage";
-import { Timers } from "./Timers";
 import { UA } from "./UA";
-import { URI } from "./URI";
 import { Utils } from "./Utils";
 
 export namespace Session {
@@ -265,7 +263,7 @@ export abstract class Session extends EventEmitter {
 
     // Convert any "body" option to a Body.
     if (options.body) {
-      options.body = fromBodyObj(options.body);
+      options.body = Utils.fromBodyObj(options.body);
     }
 
     // Convert any "receiveResponse" callback option passed to an OutgoingRequestDelegate.
@@ -643,7 +641,7 @@ export abstract class Session extends EventEmitter {
         incomingRequest.accept({
           statusCode: 200,
           extraHeaders,
-          body: fromBodyObj(description)
+          body: Utils.fromBodyObj(description)
         });
         this.status = SessionStatus.STATUS_WAITING_FOR_ACK;
         this.emit("reinviteAccepted", this);
@@ -766,7 +764,7 @@ export abstract class Session extends EventEmitter {
 
         const requestOptions: RequestOptions = {
           extraHeaders,
-          body: fromBodyObj(description)
+          body: Utils.fromBodyObj(description)
         };
 
         this.session.invite(delegate, requestOptions);
@@ -1674,7 +1672,7 @@ export class InviteServerContext extends Session implements ServerContext {
     const sdh = this.getSessionDescriptionHandler();
     return sdh
       .getDescription(options.sessionDescriptionHandlerOptions, options.modifiers)
-      .then((bodyObj) => fromBodyObj(bodyObj));
+      .then((bodyObj) => Utils.fromBodyObj(bodyObj));
   }
 
   private setAnswer(answer: Body, options: {
@@ -1703,7 +1701,7 @@ export class InviteServerContext extends Session implements ServerContext {
     return sdh
       .setDescription(offer.content, options.sessionDescriptionHandlerOptions, options.modifiers)
       .then(() => sdh.getDescription(options.sessionDescriptionHandlerOptions, options.modifiers))
-      .then((bodyObj) => fromBodyObj(bodyObj));
+      .then((bodyObj) => Utils.fromBodyObj(bodyObj));
   }
 
   private getSessionDescriptionHandler(): SessionDescriptionHandler {
@@ -1718,15 +1716,30 @@ export class InviteServerContext extends Session implements ServerContext {
 
 export namespace InviteClientContext {
   export interface Options {
+    /** Anonymous call if true. */
+    anonymous?: boolean;
+    /** Deprecated. */
+    body?: string;
+    /** Deprecated. */
+    contentType?: string;
     /** Array of extra headers added to the INVITE. */
     extraHeaders?: Array<string>;
     /** If true, send INVITE without SDP. */
     inviteWithoutSdp?: boolean;
-    /** Deprecated */
+    /** Deprecated. */
+    onInfo?: any;
+    /** Deprecated. */
     params?: {
-      toUri?: string;
-      toDisplayName: string;
+      fromDisplayName?: string;
+      fromTag?: string;
+      fromUri?: string | URI;
+      toDisplayName?: string;
+      toUri?: string | URI;
     };
+    /** Deprecated. */
+    renderbody?: string;
+    /** Deprecated. */
+    rendertype?: string;
     /** Options to pass to SessionDescriptionHandler's getDescription() and setDescription(). */
     sessionDescriptionHandlerOptions?: SessionDescriptionHandlerOptions;
   }
@@ -1745,7 +1758,12 @@ export class InviteClientContext extends Session implements ClientContext {
   private earlyMediaSessionDescriptionHandlers: Map<string, SessionDescriptionHandler>;
   private outgoingInviteRequest: OutgoingInviteRequest | undefined;
 
-  constructor(ua: UA, target: string | URI, options: any = {}, modifiers: any = []) {
+  constructor(
+    ua: UA,
+    target: string | URI,
+    options: InviteClientContext.Options = {},
+    modifiers: SessionDescriptionHandlerModifiers = []
+  ) {
     if (!ua.configuration.sessionDescriptionHandlerFactory) {
       ua.logger.warn("Can't build ISC without SDH Factory");
       throw new Error("ICC Constructor Failed");
@@ -1768,8 +1786,8 @@ export class InviteClientContext extends Session implements ClientContext {
 
     const extraHeaders: Array<string> = (options.extraHeaders || []).slice();
     if (anonymous && ua.configuration.uri) {
-      options.params.from_displayName = "Anonymous";
-      options.params.from_uri = "sip:anonymous@anonymous.invalid";
+      options.params.fromDisplayName = "Anonymous";
+      options.params.fromUri = "sip:anonymous@anonymous.invalid";
 
       extraHeaders.push("P-Preferred-Identity: " + ua.configuration.uri.toString());
       extraHeaders.push("Privacy: id");
@@ -1870,7 +1888,12 @@ export class InviteClientContext extends Session implements ClientContext {
       }
       if (this.inviteWithoutSdp) {
         // just send an invite with no sdp...
-        this.request.body = this.renderbody;
+        if (this.renderbody && this.rendertype) {
+          this.request.body = {
+            body: this.renderbody,
+            contentType: this.rendertype
+          };
+        }
         this.status = SessionStatus.STATUS_INVITE_SENT;
         this.send();
       } else {

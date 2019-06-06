@@ -3,22 +3,27 @@ import { EventEmitter } from "events";
 import { ClientContext } from "./ClientContext";
 import { C as SIPConstants } from "./Constants";
 import {
+  DigestAuthentication,
+  Grammar,
   IncomingInviteRequest,
   IncomingMessageRequest,
   IncomingNotifyRequest,
   IncomingReferRequest,
-  IncomingSubscribeRequest
-} from "./Core/messages";
-import {
-  makeUserAgentCoreConfigurationFromUA,
+  IncomingRequestMessage,
+  IncomingResponseMessage,
+  IncomingSubscribeRequest,
+  Levels,
+  Logger,
+  LoggerFactory,
+  Transport,
+  TransportError,
+  URI,
   UserAgentCore,
+  UserAgentCoreConfiguration,
   UserAgentCoreDelegate
-} from "./Core/user-agent-core";
-import { DigestAuthentication } from "./DigestAuthentication";
+} from "./core";
 import { SessionStatus, TypeStrings, UAStatus } from "./Enums";
 import { Exceptions } from "./Exceptions";
-import { Grammar } from "./Grammar";
-import { Levels, Logger, LoggerFactory } from "./LoggerFactory";
 import { Parser } from "./Parser";
 import { PublishContext } from "./PublishContext";
 import { ReferServerContext } from "./ReferContext";
@@ -33,10 +38,7 @@ import {
   SessionDescriptionHandlerFactory,
   SessionDescriptionHandlerFactoryOptions
 } from "./session-description-handler-factory";
-import { IncomingRequest, IncomingResponse } from "./SIPMessage";
 import { Subscription } from "./Subscription";
-import { Transport } from "./Transport";
-import { URI } from "./URI";
 import { Utils } from "./Utils";
 import {
   SessionDescriptionHandler as WebSessionDescriptionHandler
@@ -148,7 +150,7 @@ export class UA extends EventEmitter {
       toString: (options?: any) => string
     };
   public status: UAStatus;
-  public transport: Transport | undefined;
+  public transport: Transport;
   public sessions: {[id: string]: InviteClientContext | InviteServerContext};
   public subscriptions: {[id: string]: Subscription};
   public data: any;
@@ -259,6 +261,14 @@ export class UA extends EventEmitter {
       throw e;
     }
 
+    if (!this.configuration.transportConstructor) {
+      throw new TransportError("Transport constructor not set");
+    }
+    this.transport = new this.configuration.transportConstructor(
+      this.getLogger("sip.transport"),
+      this.configuration.transportOptions
+    );
+
     const userAgentCoreConfiguration = makeUserAgentCoreConfigurationFromUA(this);
 
     // The Replaces header contains information used to match an existing
@@ -268,7 +278,7 @@ export class UA extends EventEmitter {
     // https://tools.ietf.org/html/rfc3891#section-3
     const handleInviteWithReplacesHeader = (
       context: InviteServerContext,
-      request: IncomingRequest
+      request: IncomingRequestMessage
     ): void => {
       if (this.configuration.replaces !== SIPConstants.supported.UNSUPPORTED) {
         const replaces = request.parseHeader("replaces");
@@ -307,10 +317,10 @@ export class UA extends EventEmitter {
         // https://tools.ietf.org/html/rfc3261#section-17.2.1
         incomingInviteRequest.trying();
         incomingInviteRequest.delegate = {
-          onCancel: (cancel: IncomingRequest): void => {
+          onCancel: (cancel: IncomingRequestMessage): void => {
             context.onCancel(cancel);
           },
-          onTransportError: (error: Exceptions.TransportError): void => {
+          onTransportError: (error: TransportError): void => {
             context.onTransportError();
           }
         };
@@ -398,11 +408,9 @@ export class UA extends EventEmitter {
   public unregister(options?: any): this {
     this.configuration.register = false;
 
-    if (this.transport) {
-      this.transport.afterConnected(() => {
-        this.registerContext.unregister(options);
-      });
-    }
+    this.transport.afterConnected(() => {
+      this.registerContext.unregister(options);
+    });
 
     return this;
   }
@@ -430,20 +438,16 @@ export class UA extends EventEmitter {
     // Delay sending actual invite until the next 'tick' if we are already
     // connected, so that API consumers can register to events fired by the
     // the session.
-    if (this.transport) {
-      this.transport.afterConnected(() => {
-        context.invite();
-        this.emit("inviteSent", context);
-      });
-    }
+    this.transport.afterConnected(() => {
+      context.invite();
+      this.emit("inviteSent", context);
+    });
     return context;
   }
 
   public subscribe(target: string | URI, event: string, options: any): Subscription {
     const sub: Subscription = new Subscription(this, target, event, options);
-    if (this.transport) {
-      this.transport.afterConnected(() => sub.subscribe());
-    }
+    this.transport.afterConnected(() => sub.subscribe());
     return sub;
   }
 
@@ -460,11 +464,9 @@ export class UA extends EventEmitter {
   public publish(target: string | URI, event: string, body: string, options: any): PublishContext {
     const pub: PublishContext = new PublishContext(this, target, event, options);
 
-    if (this.transport) {
-      this.transport.afterConnected(() => {
-        pub.publish(body);
-      });
-    }
+    this.transport.afterConnected(() => {
+      pub.publish(body);
+    });
     return pub;
   }
 
@@ -492,9 +494,7 @@ export class UA extends EventEmitter {
   public request(method: string, target: string | URI, options?: any): ClientContext {
     const req: ClientContext = new ClientContext(this, method, target, options);
 
-    if (this.transport) {
-      this.transport.afterConnected(() => req.send());
-    }
+    this.transport.afterConnected(() => req.send());
     return req;
   }
 
@@ -547,9 +547,7 @@ export class UA extends EventEmitter {
     this.status = UAStatus.STATUS_USER_CLOSED;
 
     // Disconnect the transport and reset user agent core
-    if (this.transport) {
-      this.transport.disconnect();
-    }
+    this.transport.disconnect();
     this.userAgentCore.reset();
 
     if (typeof environment.removeEventListener === "function") {
@@ -572,24 +570,13 @@ export class UA extends EventEmitter {
     this.logger.log("user requested startup...");
     if (this.status === UAStatus.STATUS_INIT) {
       this.status = UAStatus.STATUS_STARTING;
-      if (!this.configuration.transportConstructor) {
-        throw new Exceptions.TransportError("Transport constructor not set");
-      }
-      this.transport = new this.configuration.transportConstructor(
-        this.getLogger("sip.transport"),
-        this.configuration.transportOptions
-      );
       this.setTransportListeners();
       this.emit("transportCreated", this.transport);
       this.transport.connect();
-
     } else if (this.status === UAStatus.STATUS_USER_CLOSED) {
       this.logger.log("resuming");
       this.status = UAStatus.STATUS_READY;
-      if (this.transport) {
-        this.transport.connect();
-      }
-
+      this.transport.connect();
     } else if (this.status === UAStatus.STATUS_STARTING) {
       this.logger.log("UA is in STARTING status, not opening new connection");
     } else if (this.status === UAStatus.STATUS_READY) {
@@ -629,12 +616,41 @@ export class UA extends EventEmitter {
     return this.log;
   }
 
+  public getSupportedResponseOptions(): Array<string> {
+    let optionTags: Array<string> = [];
+
+    if (this.contact.pubGruu || this.contact.tempGruu) {
+      optionTags.push("gruu");
+    }
+    if (this.configuration.rel100 === SIPConstants.supported.SUPPORTED) {
+      optionTags.push("100rel");
+    }
+    if (this.configuration.replaces === SIPConstants.supported.SUPPORTED) {
+      optionTags.push("replaces");
+    }
+
+    optionTags.push("outbound");
+
+    optionTags = optionTags.concat(this.configuration.extraSupported || []);
+
+    const allowUnregistered = this.configuration.hackAllowUnregisteredOptionTags || false;
+    const optionTagSet: {[name: string]: boolean} = {};
+    optionTags = optionTags.filter((optionTag: string) => {
+      const registered = SIPConstants.OPTION_TAGS[optionTag];
+      const unique = !optionTagSet[optionTag];
+      optionTagSet[optionTag] = true;
+      return (registered || allowUnregistered) && unique;
+    });
+
+    return optionTags;
+  }
+
   /**
    * Get the session to which the request belongs to, if any.
    * @param {SIP.IncomingRequest} request.
    * @returns {SIP.OutgoingSession|SIP.IncomingSession|undefined}
    */
-  public findSession(request: IncomingRequest): InviteClientContext | InviteServerContext | undefined {
+  public findSession(request: IncomingRequestMessage): InviteClientContext | InviteServerContext | undefined {
     return this.sessions[request.callId + request.fromTag] ||
       this.sessions[request.callId + request.toTag] ||
       undefined;
@@ -670,11 +686,9 @@ export class UA extends EventEmitter {
    * Helper function. Sets transport listeners
    */
   private setTransportListeners(): void {
-    if (this.transport) {
-      this.transport.on("connected", () => this.onTransportConnected());
-      this.transport.on("message", (message: string) => this.onTransportReceiveMsg(message));
-      this.transport.on("transportError", () => this.onTransportError());
-    }
+    this.transport.on("connected", () => this.onTransportConnected());
+    this.transport.on("message", (message: string) => this.onTransportReceiveMsg(message));
+    this.transport.on("transportError", () => this.onTransportError());
   }
 
   /**
@@ -695,13 +709,13 @@ export class UA extends EventEmitter {
    * @param messageString The message.
    */
   private onTransportReceiveMsg(messageString: string): void {
-    const message = Parser.parseMessage(messageString, this);
+    const message = Parser.parseMessage(messageString, this.getLogger("sip.parser"));
     if (!message) {
       this.logger.warn("UA failed to parse incoming SIP message - discarding.");
       return;
     }
 
-    if (this.status === UAStatus.STATUS_USER_CLOSED && message instanceof IncomingRequest) {
+    if (this.status === UAStatus.STATUS_USER_CLOSED && message instanceof IncomingRequestMessage) {
       this.logger.warn("UA received message when status = USER_CLOSED - aborting");
       return;
     }
@@ -723,7 +737,7 @@ export class UA extends EventEmitter {
     };
 
     // Request Checks
-    if (message instanceof IncomingRequest) {
+    if (message instanceof IncomingRequestMessage) {
       // This is port of SanityCheck.minimumHeaders().
       if (!hasMinimumHeaders()) {
         this.logger.warn(`Request missing mandatory header field. Dropping.`);
@@ -750,7 +764,7 @@ export class UA extends EventEmitter {
     }
 
     // Reponse Checks
-    if (message instanceof IncomingResponse) {
+    if (message instanceof IncomingResponseMessage) {
       // This is port of SanityCheck.minimumHeaders().
       if (!hasMinimumHeaders()) {
         this.logger.warn(`Response missing mandatory header field. Dropping.`);
@@ -784,13 +798,13 @@ export class UA extends EventEmitter {
     }
 
     // Handle Request
-    if (message instanceof IncomingRequest) {
+    if (message instanceof IncomingRequestMessage) {
       this.userAgentCore.receiveIncomingRequestFromTransport(message);
       return;
     }
 
     // Handle Response
-    if (message instanceof IncomingResponse) {
+    if (message instanceof IncomingResponseMessage) {
       this.userAgentCore.receiveIncomingResponseFromTransport(message);
       return;
     }
@@ -845,6 +859,8 @@ export class UA extends EventEmitter {
       transportConstructor: WebTransport,
       transportOptions: {},
 
+      usePreloadedRoute: false,
+
       // string to be inserted into User-Agent request header
       userAgentString: SIPConstants.USER_AGENT,
 
@@ -888,7 +904,9 @@ export class UA extends EventEmitter {
       sessionDescriptionHandlerFactory: WebSessionDescriptionHandler.defaultFactory,
 
       authenticationFactory: this.checkAuthenticationFactory((ua: UA) => {
-        return new DigestAuthentication(ua);
+        return new DigestAuthentication(
+          ua.getLoggerFactory(), this.configuration.authorizationUser, this.configuration.password
+        );
       }),
 
       allowLegacyNotifications: false,
@@ -1203,6 +1221,12 @@ export class UA extends EventEmitter {
           }
         },
 
+        usePreloadedRoute: (usePreloadedRoute: boolean): boolean | undefined => {
+          if (typeof usePreloadedRoute === "boolean") {
+            return usePreloadedRoute;
+          }
+        },
+
         userAgentString: (userAgentString: string): string | undefined => {
           if (typeof userAgentString === "string") {
             return userAgentString;
@@ -1269,4 +1293,74 @@ export namespace UA {
     RTP = "rtp",
     INFO = "info"
   }
+}
+
+/**
+ * Factory function to generate configuration give a UA.
+ * @param ua UA
+ */
+export function makeUserAgentCoreConfigurationFromUA(ua: UA): UserAgentCoreConfiguration {
+  // FIXME: Configuration URI is a bad mix of types currently. It also needs to exist.
+  if (!(ua.configuration.uri instanceof URI)) {
+    throw new Error("Configuration URI not instance of URI.");
+  }
+  const aor = ua.configuration.uri;
+  const contact = ua.contact;
+  const displayName = ua.configuration.displayName ? ua.configuration.displayName : "";
+  const hackViaTcp = ua.configuration.hackViaTcp ? true : false;
+  const routeSet =
+     ua.configuration.usePreloadedRoute && ua.transport.server && ua.transport.server.sipUri ?
+      [ua.transport.server.sipUri] :
+      [];
+  const sipjsId = ua.configuration.sipjsId || Utils.createRandomToken(5);
+
+  let supportedOptionTags: Array<string> = [];
+  supportedOptionTags.push("outbound"); // TODO: is this really supported?
+  if (ua.configuration.rel100 === SIPConstants.supported.SUPPORTED) {
+    supportedOptionTags.push("100rel");
+  }
+  if (ua.configuration.replaces === SIPConstants.supported.SUPPORTED) {
+    supportedOptionTags.push("replaces");
+  }
+  if (ua.configuration.extraSupported) {
+    supportedOptionTags.push(...ua.configuration.extraSupported);
+  }
+  if (!ua.configuration.hackAllowUnregisteredOptionTags) {
+    supportedOptionTags = supportedOptionTags.filter((optionTag) => SIPConstants.OPTION_TAGS[optionTag]);
+  }
+  supportedOptionTags = Array.from(new Set(supportedOptionTags)); // array of unique values
+
+  const supportedOptionTagsResponse = ua.getSupportedResponseOptions();
+
+  const userAgentHeaderFieldValue = ua.configuration.userAgentString || "sipjs";
+
+  if (!(ua.configuration.viaHost)) {
+    throw new Error("Configuration via host undefined");
+  }
+  const viaForceRport = ua.configuration.forceRport ? true : false;
+  const viaHost = ua.configuration.viaHost;
+
+  const configuration: UserAgentCoreConfiguration = {
+    aor,
+    contact,
+    displayName,
+    hackViaTcp,
+    loggerFactory: ua.getLoggerFactory(),
+    routeSet,
+    sipjsId,
+    supportedOptionTags,
+    supportedOptionTagsResponse,
+    userAgentHeaderFieldValue,
+    viaForceRport,
+    viaHost,
+    authenticationFactory: () => {
+      if (ua.configuration.authenticationFactory) {
+        return ua.configuration.authenticationFactory(ua);
+      }
+      return undefined;
+    },
+    transportAccessor: () => ua.transport
+  };
+
+  return configuration;
 }
